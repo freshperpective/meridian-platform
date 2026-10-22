@@ -1,0 +1,2 @@
+Symptom → Diagnosis → Fix → Lesson
+
