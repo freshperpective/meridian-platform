@@ -2,6 +2,10 @@
 
 
 
+Format: \*\*What I broke → Symptom → Diagnosis → Fix → Lesson\*\*
+
+
+
 \## #0 — Detached HEAD while trying to discard a change
 
 \*\*Date:\*\* 2026-10-23
@@ -30,6 +34,8 @@ failed with "pathspec did not match", and `git status` showed "HEAD detached at 
 
 \*\*Fix:\*\*
 
+
+
 &#x20;   git switch main
 
 &#x20;   git restore podinfo.yaml
@@ -40,7 +46,7 @@ failed with "pathspec did not match", and `git status` showed "HEAD detached at 
 
 \*\*Lesson:\*\* `git restore <file>` discards local changes; `git switch <branch>` moves
 
-between branches. Detached HEAD = HEAD points at a commit, not a branch; get out with
+between branches. Detached HEAD means HEAD points at a commit, not a branch; get out with
 
 `git switch <branch>`.
 
@@ -98,37 +104,63 @@ old pods keep serving. "Malformed HTTP response" means you hit the wrong protoco
 
 
 
-
-
 \## #2 — Container OOMKilled by a memory limit
 
 \*\*Date:\*\* 2026-10-23
 
 
 
-\*\*What I broke:\*\* Set memory limit to 32Mi and added `--stress-memory=64Mi`.
+\*\*What I broke:\*\* Set the memory limit to `32Mi` (request `16Mi`) and added
+
+`--stress-memory=64`, so podinfo tries to allocate 64 MB at startup.
 
 
 
-\*\*Symptom:\*\* RESTARTS column went CrashLoopBackOff; status showed OOMKilled.
+\*\*Symptom:\*\* `kubectl get pods -w` showed STATUS `OOMKilled`, then `CrashLoopBackOff`,
+
+with RESTARTS climbing (3 within 40 seconds).
 
 
 
 \*\*Diagnosis:\*\*
 
-\- `kubectl describe pod` → Last State: Terminated, Reason: OOMKilled, Exit Code: \_\_\_\_
+\- `kubectl describe pod` → `State: Waiting, Reason: CrashLoopBackOff` and
 
-\- OOMKilled vs CrashLoopBackOff: OOMKilled is cause; CrashLoopBackOff is symptom.
+&#x20; `Last State: Terminated, Reason: OOMKilled, Exit Code: 137`.
 
-\- Why the container was killed instead of slowed down: \_\_\_\_
+\- `Started` and `Finished` were the same second: the container died the moment it
+
+&#x20; allocated more than 32Mi.
+
+\- Exit code 137 = 128 + 9: the process was killed by SIGKILL, sent by the kernel's
+
+&#x20; OOM killer when the container's cgroup went over its memory limit.
+
+\- OOMKilled vs CrashLoopBackOff: OOMKilled is the \*\*cause\*\* (why the container died, in
+
+&#x20; Last State). CrashLoopBackOff is the \*\*symptom\*\* (the kubelet waiting longer and longer
+
+&#x20; between restarts). Any repeated crash shows CrashLoopBackOff; Last State tells you why.
+
+\- Why killed instead of slowed down: CPU is compressible, so a container over its CPU
+
+&#x20; limit is throttled and just runs slower. Memory isn't compressible: the kernel can't
+
+&#x20; take back memory a process is using, so it kills the process instead.
 
 
 
-\*\*Fix:\*\* Fixed the memory by restoring the podinfo file and then applied it
+\*\*Fix:\*\* Restored the original manifest (`git restore --source f003818 podinfo.yaml`),
+
+which removed the stress flag and set limits back to `512Mi` / requests `64Mi`, then
+
+re-applied. Pods returned to `1/1 Running`.
 
 
 
-\*\*Lesson:\*\* The container should have sufficient memory for it to run
+\*\*Lesson:\*\* Memory limits are hard limits: exceed one and the kernel kills the process
 
+(exit 137). Set limits from observed usage (`kubectl top pod`), and when a pod is
 
+crash-looping, read \*\*Last State\*\*, not the current status, to find out why.
 
